@@ -1,0 +1,85 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <linux/input.h>
+#include <linux/uinput.h>
+
+#define UNEXPECTED(cond) do { if (cond) { do_unexpected(errno, #cond, __FILE__, __LINE__); } while(0) 
+
+void do_unexpected(int err, const char* cond, const char *file, int line)
+{
+	fprintf(stderr, "Unexpected error %s [errno=%d, errstr=%s] at %s:%d", 
+			cond, err, strerror(errno), file, line);
+	exit(1);
+}
+	
+
+#define die(str, args...) do { \
+	perror(str); \
+	exit(EXIT_FAILURE); \
+} while(0)
+
+int main(int argc, char* argv[])
+{
+	int                    fdo, fdi;
+	struct uinput_user_dev uidev;
+	struct input_event     ev;
+	int                    i;
+
+	sleep(100);
+	printf("TEST");
+
+	if(argc != 2) die("error: specify input device");
+
+	fdo = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+	if(fdo < 0) die("error: open");
+
+	fdi = open(argv[1], O_RDONLY);
+	if(fdi < 0) die("error: open");
+
+	ioctl(fdo, EVIOCGRAB, 1); // GRAB
+       	ioctl(fdo, EVIOCGRAB, 0); // UNGRAB 
+
+	if(ioctl(fdi, EVIOCGRAB, 1) < 0) die("error: ioctl");
+
+	if(ioctl(fdo, UI_SET_EVBIT, EV_SYN) < 0) die("error: ioctl");
+	if(ioctl(fdo, UI_SET_EVBIT, EV_KEY) < 0) die("error: ioctl");
+	if(ioctl(fdo, UI_SET_EVBIT, EV_MSC) < 0) die("error: ioctl");
+
+	for(i = 0; i < KEY_MAX; ++i)
+		if(ioctl(fdo, UI_SET_KEYBIT, i) < 0) die("error: ioctl");
+
+	memset(&uidev, 0, sizeof(uidev));
+	snprintf(uidev.name, UINPUT_MAX_NAME_SIZE, "uinput-sample");
+	uidev.id.bustype = BUS_USB;
+	uidev.id.vendor  = 0x1;
+	uidev.id.product = 0x1;
+	uidev.id.version = 1;
+
+	if(write(fdo, &uidev, sizeof(uidev)) < 0) die("error: write");
+	if(ioctl(fdo, UI_DEV_CREATE) < 0) die("error: ioctl");
+
+		printf("test %i", 0);
+	while(1)
+	{
+		//printf("Key?: %x", ev.code);
+		if(read(fdi, &ev, sizeof(struct input_event)) < 0)
+			die("error: read");
+
+		ev.time.tv_sec = 0;
+		ev.time.tv_usec = 0;
+
+		if(write(fdo, &ev, sizeof(struct input_event)) < 0)
+			die("error: write");
+	}
+
+	if(ioctl(fdo, UI_DEV_DESTROY) < 0) die("error: ioctl");
+
+	close(fdi);
+	close(fdo);
+
+	return 0;
+}
